@@ -1,0 +1,14 @@
+.{
+    .name = "rclzig",
+    .version = "0.1.0",
+    .dependencies = .{
+        .zigros = .{
+            .url = "https://github.com/zig-robotics/zigros/archive/refs/tags/v0.1.0.tar.gz",
+            .hash = "12201d34f6ffa34e2451af00e279c5582b2b5b7861f60e2cb19f9e2c4791194a29ca",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+    },
+}
