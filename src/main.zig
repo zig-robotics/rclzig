@@ -9,45 +9,189 @@ pub const std_options = .{
 };
 
 const rclzig = @import("rclzig");
-
-const rosidl_runtime = rclzig.rosid_runtime;
-
 const builtin_interfaces = @import("builtin_interfaces");
+const rcl_interfaces = @import("rcl_interfaces");
 
-pub var my_pub: rclzig.publisher.Publisher(builtin_interfaces.msg.Time) = undefined;
-pub var pub_msg = builtin_interfaces.msg.Time{};
-pub var short_timer_counter: i32 = 0;
+const TestNodeStrings = struct {
+    const Self = @This();
+    node: rclzig.Node,
+    publisher: rclzig.publisher.Publisher(rcl_interfaces.msg.Log),
+    subscription: rclzig.subscription.Subscription(rcl_interfaces.msg.Log, subCallback),
+    timer: rclzig.Timer(timerCallback),
+    log_msg: rcl_interfaces.msg.Log,
+    allocator: rclzig.RclAllocator,
 
-pub fn mySubscriberCallback(msg: builtin_interfaces.msg.Time) !void {
-    // pub fn mySubscriberCallback(msg: std_msgs.msg.Int32) !void {
-    std.log.info("Callback: I heard: {}", .{msg.sec});
-}
+    fn init(
+        self: *Self,
+        allocator: rclzig.RclAllocator,
+        clock: *rclzig.time.Clock,
+        context: *rclzig.Context,
+    ) !void {
+        // Get defaults and mark defered initialized elements explicitly
+        self.* = .{
+            .node = undefined,
+            .publisher = undefined,
+            .subscription = undefined,
+            .timer = undefined,
+            .log_msg = try rcl_interfaces.msg.Log.init(allocator),
+            .allocator = allocator,
+        };
+        errdefer self.log_msg.deinit(allocator);
 
-pub fn myTimerCallback() !void {
-    try my_pub.publish(pub_msg);
-    pub_msg.sec += 1;
-}
+        try self.log_msg.msg.assign(allocator, "boop" ** 1000000);
 
-pub fn shortTimerCallback() void {
-    std.log.info("shorttimer {}", .{blk: {
-        const ref = &short_timer_counter;
-        const tmp = ref.*;
-        ref.* +%= 1;
-        break :blk tmp;
-    }});
-}
+        self.node = try rclzig.Node.init(allocator, "test_node2", context);
+        errdefer self.node.deinit();
 
-// const TestNode = struct {
-//     publisher: rclzig.publisher.Publisher(builtin_interfaces.msg.Time),
-//     subscription: rclzig.subscription.Subscription(builtin_interfaces.msg.Time),
-//     timer: rclzig.Timer,
-//     last_sec: i32 = 0,
+        self.publisher = try rclzig.publisher.Publisher(rcl_interfaces.msg.Log).init(
+            allocator,
+            &self.node,
+            "test_log",
+            rclzig.rmw.QosProfile{},
+        );
+        errdefer self.publisher.deinit(&self.node) catch {};
 
-//     fn subCallback(self: TestNode, msg: builtin_interfaces.msg.Time) !void {
-//         self.last_sec = msg.sec;
-//         std.log.info("subscriber callback, current time {}, prev time {}", .{ msg.sec, self.last_sec });
-//     }
-// };
+        self.subscription = try rclzig.subscription.Subscription(rcl_interfaces.msg.Log, subCallback).initBind(
+            allocator,
+            &self.node,
+            "test_log",
+            rclzig.rmw.QosProfile{},
+            self,
+        );
+        errdefer self.subscription.deinit(allocator, &self.node);
+
+        self.timer = try rclzig.Timer(timerCallback).init(
+            allocator,
+            clock,
+            context,
+            1000000000,
+            self,
+        );
+
+        self.subCallback(&self.subscription.msg);
+    }
+
+    pub fn deinit(self: *Self, allocator: rclzig.RclAllocator) void {
+        self.timer.deinit();
+        self.publisher.deinit(&self.node) catch {};
+        self.subscription.deinit(allocator, &self.node);
+        self.node.deinit();
+        self.log_msg.deinit(allocator);
+    }
+
+    fn subCallback(self: *Self, msg: *const rcl_interfaces.msg.Log) void {
+        _ = self;
+        std.log.info(
+            "subscriber callback\nmessage location: {*}\npointer location: {*}\nsize: {}\ncapacity: {}",
+            .{ msg, msg.msg.data, msg.msg.size, msg.msg.capacity },
+        );
+    }
+
+    fn timerCallback(self: *Self) void {
+        self.publisher.publish(&self.log_msg) catch {};
+        self.log_msg.msg.appendSlice(self.allocator, "bop" ** 1000000) catch @panic("OOM");
+    }
+};
+
+const TestNodeSequences = struct {
+    const Self = @This();
+    node: rclzig.Node,
+    publisher: rclzig.publisher.Publisher(rcl_interfaces.msg.ParameterValue),
+    subscription: rclzig.subscription.Subscription(rcl_interfaces.msg.ParameterValue, subCallback),
+    timer: rclzig.Timer(timerCallback),
+    msg: rcl_interfaces.msg.ParameterValue,
+    allocator: std.mem.Allocator,
+
+    // In this node the rcl_allocator is used only for the subscriber
+    // Note that a pointer to the internally stored allocator is used. Therefore
+    // this object can't be trivially coppied after initialization
+    fn init(
+        self: *Self,
+        allocator: std.mem.Allocator,
+        rcl_allocator: rclzig.RclAllocator,
+        clock: *rclzig.time.Clock,
+        context: *rclzig.Context,
+    ) !void {
+        // Get defaults and mark defered initialized elements explicitly
+        self.* = .{
+            .node = undefined,
+            .publisher = undefined,
+            .subscription = undefined,
+            .timer = undefined,
+            .msg = try rcl_interfaces.msg.ParameterValue.init(allocator),
+            .allocator = allocator,
+        };
+        errdefer self.msg.deinit(allocator);
+
+        try self.msg.integer_array_value.reserve(allocator, 1000);
+
+        self.node = try rclzig.Node.init(rclzig.RclAllocator.initFromZig(&self.allocator), "test_node_sequence", context);
+        errdefer self.node.deinit();
+
+        self.publisher = try rclzig.publisher.Publisher(rcl_interfaces.msg.ParameterValue).init(
+            rclzig.RclAllocator.initFromZig(&self.allocator),
+            &self.node,
+            "test_sequence",
+            rclzig.rmw.QosProfile{},
+        );
+        errdefer self.publisher.deinit(&self.node) catch {};
+
+        self.subscription = try rclzig.subscription.Subscription(rcl_interfaces.msg.ParameterValue, subCallback).initBind(
+            rcl_allocator,
+            &self.node,
+            "test_sequence",
+            rclzig.rmw.QosProfile{},
+            self,
+        );
+        errdefer self.subscription.deinit(rcl_allocator, &self.node);
+
+        self.timer = try rclzig.Timer(timerCallback).init(
+            rclzig.RclAllocator.initFromZig(&self.allocator),
+            clock,
+            context,
+            1000000000,
+            self,
+        );
+    }
+
+    pub fn deinit(self: *Self, rcl_allocator: rclzig.RclAllocator) void {
+        self.timer.deinit();
+        self.publisher.deinit(&self.node) catch {};
+        self.subscription.deinit(rcl_allocator, &self.node);
+        self.node.deinit();
+        self.msg.deinit(self.allocator);
+    }
+
+    fn subCallback(self: *Self, msg: *const rcl_interfaces.msg.ParameterValue) void {
+        _ = self;
+        std.log.info(
+            "sequence callback\nmessage location: {*}\npointer location: {*}\nsize: {}\ncapacity: {}",
+            .{
+                msg,
+                msg.integer_array_value.data,
+                msg.integer_array_value.size,
+                msg.integer_array_value.capacity,
+            },
+        );
+    }
+
+    fn timerCallback(self: *Self) void {
+        var array = self.msg.integer_array_value.toArrayList();
+        array.appendSlice(self.allocator, &[_]i64{10} ** 1000000) catch @panic("OOM");
+        // TODO nicer zig 0.14 syntax
+        self.msg.integer_array_value = @TypeOf(self.msg.integer_array_value).fromArrayList(&array);
+        std.log.info(
+            "sequence timer\nmessage location: {*}\npointer location: {*}\nsize: {}\ncapacity: {}",
+            .{
+                &self.msg,
+                self.msg.integer_array_value.data,
+                self.msg.integer_array_value.size,
+                self.msg.integer_array_value.capacity,
+            },
+        );
+        self.publisher.publish(&self.msg) catch {};
+    }
+};
 
 pub fn main() !u8 {
     var gpa = std.heap.GeneralPurposeAllocator(.{ .enable_memory_limit = true }){};
@@ -59,59 +203,39 @@ pub fn main() !u8 {
             std.log.debug("general purpose allocator reports no leaks", .{});
         }
     }
-    var allocator = gpa.allocator();
+    const allocator = gpa.allocator();
+    // var allocator = std.heap.c_allocator;
+    const rcl_allocator = rclzig.allocator.getDefaultRclAllocator();
+    const paramter_msg = try rcl_interfaces.msg.Parameter.init(rcl_allocator);
+    _ = paramter_msg;
 
     // var allocator = std.heap.c_allocator; // The subscriber middleware seems to be calling free internally.
     // This means that when sequences are used, we're forced to use the c allocator
 
-    // var buffer: [4000]u8 = undefined;
-    // var fba = std.heap.FixedBufferAllocator.init(&buffer);
-    // var allocator = fba.allocator();
-
-    var context = try rclzig.init(&allocator);
+    var context = try rclzig.init(rcl_allocator);
     defer rclzig.shutdown(&context);
 
-    var clock = try rclzig.time.Clock.init(&allocator, rclzig.time.ClockType.system_time);
+    var clock = try rclzig.time.Clock.init(rcl_allocator, rclzig.time.ClockType.system_time);
     defer clock.deinit();
 
-    // Does context and node options need to be a pointer here?
-    var my_node = try rclzig.Node.init(&allocator, "name_0", &context);
-    defer my_node.deinit();
+    var string_node: TestNodeStrings = undefined;
+    try string_node.init(rcl_allocator, &clock, &context);
+    defer string_node.deinit(rcl_allocator);
 
-    const topic_name_zig: [:0]const u8 = "topic_0";
-
-    my_pub = try rclzig.publisher.Publisher(builtin_interfaces.msg.Time).init(
-        &std.heap.c_allocator,
-        &my_node,
-        topic_name_zig,
-        rclzig.rmw.QosProfile{ .depth = 1 },
-    );
-    defer my_pub.deinit(&my_node) catch {};
-
-    var my_timer = try rclzig.Timer.init(&allocator, .{ .callback_with_error = &myTimerCallback }, &clock, &context, 1000 * std.time.ns_per_ms);
-    defer my_timer.deinit();
-
-    var short_timer = try rclzig.Timer.init(&allocator, .{ .callback = &shortTimerCallback }, &clock, &context, 100 * std.time.ns_per_ms);
-    defer short_timer.deinit();
-
-    pub_msg.sec = 1;
-
-    var my_zig_sub = try rclzig.subscription.Subscription(builtin_interfaces.msg.Time).init(
-        &std.heap.c_allocator,
-        &my_node,
-        &mySubscriberCallback,
-        topic_name_zig,
-        rclzig.rmw.QosProfile{},
-    );
-    defer my_zig_sub.deinit(std.heap.c_allocator);
+    var sequence_node: TestNodeSequences = undefined;
+    try sequence_node.init(allocator, rcl_allocator, &clock, &context);
+    defer sequence_node.deinit(rcl_allocator);
 
     var executor = try rclzig.Executor.init(allocator);
     defer executor.deinit();
 
-    try executor.addSubscription(&my_zig_sub);
-    try executor.addTimer(&my_timer);
-    try executor.addTimer(&short_timer);
-    try executor.spin(&allocator, &context);
+    try executor.addSubscription(&string_node.subscription);
+    try executor.addTimer(&string_node.timer);
+
+    try executor.addSubscription(&sequence_node.subscription);
+    try executor.addTimer(&sequence_node.timer);
+
+    try executor.spin(rcl_allocator, &context);
 
     std.log.info("shuhtting down...", .{});
     return 0;

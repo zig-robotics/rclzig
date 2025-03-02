@@ -8,6 +8,7 @@ This repo provides a ROS client library for Zig.
 It's still currently under development, but open to colaborators.
 If you're interested in working on it with me let me know and we can coordinate.
 
+So far there's a simple example of pups subs and timers working in the test project in `src/main.zig`.
 
 ## A bit of history
 
@@ -33,3 +34,30 @@ For example rcl provides default initializations through function calls, however
 Since the backend remains c, structures that need to be turned ziggy will have an "rcl" member or function that returns the underlying rcl member, or the zig struct cast to the rcl equivalent.
 All Enums shall be converted, but use the rcl converted constants and types for compatibility.
 Both building against an existing ROS install and ZigROS should be supported.
+
+## Notes on allocators
+
+The rcl allocator is wrapped in `rcl/allocator.zig`.
+It provides functions that match the zig allocator.
+Matching the zig allocator functions allows for it to be easily intercahnged.
+Functions that need to interact with the rcl will take the RclAllocator instead of the standard zig allocator.
+Functions that don't interact with the rcl will take the normal zig allocator.
+Any infrastructure where the type of allocator depends on context should take `anytype` which allows the allocator to be decided by the user.
+Zig messages work with either type of allocator in this way.
+Messages that come from the rmw (like for subscriptions) should always use a non zig backed rcl allocator, in the majority of cases the default allocator.
+Messages everywhere else (like publishers) can choose between the zig or rcl allocator.
+
+### Using zig allocators to back an rcl allocator
+
+The RclAllocator wrapper provides a function `initFromZig` to create an rcl allocator from a zig allocator.
+This is useful for arenas, and using the gpa during testing to find memory issues.
+Make sure its only used on rcl components that don't cross into the rmw layer.
+The wrapper currently stuffs the size of the allocation in front of the returned memory.
+This added indirection makes zigs C allocators not compatible with memory created or modified outside of the wrapper.
+
+### Allocations and the RMW
+
+Currently the RMW has no way to accept the allocator.
+This means that any dynamic memory that crosses that boundary must use an allocator compatible with your RMW (almost always raw malloc and friends).
+Specifically, any memory that interacts with an `rmw_take` call should use the default rcl allocator, accesible via `getDefaultRclAllocator`.
+RCL allocators using a backing zig allocator should not be used to cross the RMW boundary.

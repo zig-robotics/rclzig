@@ -1,6 +1,6 @@
 const std = @import("std");
 const rcl = @import("rcl.zig").rcl;
-const rcl_allocator = @import("allocator.zig");
+const RclAllocator = @import("allocator.zig").RclAllocator;
 const rcl_error = @import("error.zig");
 
 pub const ClockType = enum(rcl.rcl_clock_type_t) {
@@ -23,12 +23,14 @@ pub const ClockChange = enum(rcl.rcl_clock_change_t) {
 };
 
 pub const Clock = struct {
-    rcl_clock: rcl.rcl_clock_t = undefined,
+    rcl_clock: rcl.rcl_clock_t,
 
-    pub fn init(allocator: *const std.mem.Allocator, clock_type: ClockType) !Clock {
-        var clock = Clock{};
-        _ = rcl.rcl_clock_init(@intFromEnum(clock_type), &clock.rcl_clock, @constCast(&rcl_allocator.Allocator.init_rcl(allocator)));
-        defer _ = rcl.rcl_clock_fini(@ptrCast(&clock));
+    pub fn init(allocator: RclAllocator, clock_type: ClockType) !Clock {
+        var clock: Clock = undefined;
+        // pointer to otherwise stack allocator is fine as clock_init calls all copy the underlying object, the pointer is not stored
+        // Const cast is also fine as the underlying c calls only use the allocator, they don't modify it. Keeps the zig api cleaner
+        const ret = rcl.rcl_clock_init(@intFromEnum(clock_type), &clock.rcl_clock, @constCast(@ptrCast(&allocator.rcl_allocator)));
+        if (ret != rcl_error.RCL_RET_OK) return rcl_error.intToRclError(ret);
         return clock;
     }
 

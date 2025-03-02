@@ -2,7 +2,9 @@ const std = @import("std");
 
 const rcl = @import("rcl.zig").rcl;
 
-pub const Allocator = @import("allocator.zig").Allocator;
+pub const allocator = @import("allocator.zig");
+pub const RclAllocator = @import("allocator.zig").RclAllocator;
+
 pub const node = @import("node.zig");
 pub const Node = node.Node;
 
@@ -43,9 +45,9 @@ pub const Context = rcl.rcl_context_t;
 
 pub const Executor = @import("executor.zig").Executor;
 
-pub fn init(allocator: *const std.mem.Allocator) !Context {
+pub fn init(allocator_: RclAllocator) !Context {
     var init_options: rcl.rcl_init_options_t = rcl.rcl_get_zero_initialized_init_options();
-    var rc = rcl.rcl_init_options_init(&init_options, Allocator.init_rcl(allocator));
+    var rc = rcl.rcl_init_options_init(&init_options, allocator_.rcl_allocator);
     if (rc != rcl_error.RCL_RET_OK) {
         return (rcl_error.intToRclError(rc));
     }
@@ -67,9 +69,9 @@ pub fn init(allocator: *const std.mem.Allocator) !Context {
 pub fn shutdown(context: *Context) void {
     // Should be safe to ignore return
     // https://github.com/ros2/rcl/blob/rolling/rcl/include/rcl/context.h#L185
-    defer _ = rcl.rcl_context_fini(context);
+    _ = rcl.rcl_context_fini(context);
 
     // Should be safe to ingore return
     // https://github.com/ros2/rcl/blob/rolling/rcl/include/rcl/init.h#L107
-    defer _ = rcl.rcl_shutdown(context);
+    _ = rcl.rcl_shutdown(context);
 }

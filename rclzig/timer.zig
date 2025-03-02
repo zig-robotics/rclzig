@@ -2,59 +2,99 @@ const std = @import("std");
 const rcl = @import("rcl.zig").rcl;
 const rcl_error = @import("error.zig");
 const rmw = @import("rmw.zig");
-const rcl_allocator = @import("allocator.zig");
+const RclAllocator = @import("allocator.zig").RclAllocator;
 const Context = @import("rclzig.zig").Context;
 const time = @import("time.zig");
 
-pub const TimerCallback = *const fn () void;
-pub const TimerCallbackWithError = *const fn () anyerror!void;
+pub fn Timer(callback: anytype) type {
+    const CallbackT = @TypeOf(callback);
+    const CircumstanceT = switch (@typeInfo(CallbackT)) {
+        .Fn => |f| if (f.params.len == 0)
+            void
+        else if (f.params.len == 1)
+            if (f.params[0].type) |T|
+                T
+            else
+                @compileError("Callback function " ++ @typeName(CallbackT) ++
+                    " an argument, but the type is undefined")
+        else
+            @compileError("Callback has too many arguments. Callbacks can either be stateless and take no arguments or be stateful and take a single context argument."),
+        else => @compileError("Callback must be a function."),
+    };
 
-pub const TimerCallbacks = union(enum) {
-    callback: TimerCallback,
-    callback_with_error: TimerCallbackWithError,
-};
+    if (CircumstanceT != void) {
+        return struct {
+            const Self = @This();
+            pub const stateful = true;
+            rcl_timer: rcl.rcl_timer_t,
+            circumstance: CircumstanceT, // TODO context is taken, pick a better alternative namde?
 
-pub const TimerError = error{
-    InvalidTimerCallbackType,
-};
+            pub fn init(
+                allocator: RclAllocator,
+                clock: *time.Clock,
+                context: *Context,
+                period_ns: i64,
+                circumstance: CircumstanceT,
+            ) !Self {
+                return .{
+                    .rcl_timer = try initTimer(allocator, clock, context, period_ns),
+                    .circumstance = circumstance,
+                };
+            }
 
-pub const Timer = struct {
-    rcl_timer: rcl.rcl_timer_t,
-    callback: TimerCallbacks,
+            pub fn typeErrased(circumstance: *anyopaque) void {
+                callback(@ptrCast(@alignCast(circumstance)));
+            }
 
-    // TODO switch to duration type?
-    // TODO I think this style of init doesn't work because rcl_timer itself is a member, not a pointer,
-    // so the copy on return throws. things off??
-    // I'm not convinced since its only members are pointers?
-    // DOC
-    // Allocator is a pointer here because the underlying rcl allocator tracks "state" as a pointer
-    // TODO make a ziggy callback type?
-    pub fn init(allocator: *std.mem.Allocator, callback: TimerCallbacks, clock: *time.Clock, context: *Context, period_ns: i64) !Timer {
-        var return_value = Timer{
-            .rcl_timer = rcl.rcl_get_zero_initialized_timer(),
-            .callback = callback,
+            pub fn deinit(self: *Self) void {
+                // TODO handle return code?
+                // Or link to where its safe to ignore
+                _ = rcl.rcl_timer_fini(&self.rcl_timer);
+            }
         };
-        // TODO this here is a good lesson
-        // This line here is why we can't do the nice "constructor" init. We're storing a pointer to a temporary
-        // since the rclzig allocator needs to be only pointers
-        // TODO trying to work around this by taking a pointer to the allocator
-        // return_value.rclzig_allocator.zig_allocator = &return_value.allocator;
-        const rc = rcl.rcl_timer_init(
-            &return_value.rcl_timer,
-            &clock.rcl_clock,
-            context,
-            period_ns,
-            null,
-            rcl_allocator.Allocator.init_rcl(allocator),
-        );
-        if (rc != rcl_error.RCL_RET_OK) {
-            return rcl_error.intToRclError(rc);
-        }
-        return return_value;
-    }
+    } else {
+        return struct {
+            const Self = @This();
+            pub const stateful = false;
+            rcl_timer: rcl.rcl_timer_t,
 
-    pub fn deinit(self: *Timer) void {
-        // TODO handle return code?
-        _ = rcl.rcl_timer_fini(&self.rcl_timer);
+            pub fn init(
+                allocator: RclAllocator,
+                clock: *time.Clock,
+                context: *Context,
+                period_ns: i64,
+            ) !Self {
+                return .{
+                    .rcl_time = try initTimer(allocator, clock, context, period_ns),
+                };
+            }
+
+            pub fn typeErrased(circumstance: *anyopaque) void {
+                _ = circumstance;
+                callback();
+            }
+
+            pub fn deinit(self: *Self) void {
+                // TODO handle return code?
+                _ = rcl.rcl_timer_fini(&self.rcl_timer);
+            }
+        };
     }
-};
+}
+
+fn initTimer(allocator: RclAllocator, clock: *time.Clock, context: *Context, period_ns: i64) !rcl.rcl_timer_t {
+    var rcl_timer = rcl.rcl_get_zero_initialized_timer();
+
+    const rc = rcl.rcl_timer_init(
+        &rcl_timer,
+        &clock.rcl_clock,
+        context,
+        period_ns,
+        null,
+        allocator.rcl_allocator,
+    );
+    if (rc != rcl_error.RCL_RET_OK) {
+        return rcl_error.intToRclError(rc);
+    }
+    return rcl_timer;
+}

@@ -1,7 +1,7 @@
 const rcl = @import("rcl.zig").rcl;
 
 const std = @import("std");
-const Allocator = @import("allocator.zig").Allocator;
+const RclAllocator = @import("allocator.zig").RclAllocator;
 const Node = @import("node.zig").Node;
 const rmw = @import("rmw.zig");
 const rcl_error = @import("error.zig");
@@ -11,14 +11,14 @@ pub fn Publisher(comptime T: type) type {
         const Self = @This();
         publisher: rcl.rcl_publisher_t,
 
-        pub fn init(allocator: *const std.mem.Allocator, node: *Node, topic: [:0]const u8, qos: rmw.QosProfile) !Self {
+        pub fn init(allocator: RclAllocator, node: *Node, topic: [:0]const u8, qos: rmw.QosProfile) !Self {
             var return_value = Self{
                 // RCL assumes zero init, we can't use zigs "undefined" to initialize or we get already init errors
                 .publisher = rcl.rcl_get_zero_initialized_publisher(),
             };
             var options = rcl.rcl_publisher_get_default_options();
             options.qos = qos.rcl().*;
-            options.allocator = Allocator.init_rcl(allocator);
+            options.allocator = allocator.rcl_allocator;
 
             const rc = rcl.rcl_publisher_init(
                 &return_value.publisher,
@@ -33,8 +33,9 @@ pub fn Publisher(comptime T: type) type {
             return return_value;
         }
 
-        pub fn publish(self: *Self, msg: T) !void {
-            const rc = rcl.rcl_publish(&self.publisher, @as(?*const anyopaque, @ptrCast(&msg)), null);
+        pub fn publish(self: *Self, msg: *const T) !void {
+            // const rc = rcl.rcl_publish(&self.publisher, @as(?*const anyopaque, @ptrCast(msg)), null);
+            const rc = rcl.rcl_publish(&self.publisher, @ptrCast(msg), null);
             if (rc != rcl_error.RCL_RET_OK) {
                 return rcl_error.intToRclError(rc);
             }

@@ -1,4 +1,5 @@
 // TODO sprinkle in sources for these?
+// TODO add tests that assert these match the rcl default functions
 const rcl = @import("rcl.zig").rcl;
 pub const QosReliabilityPolicy = enum(rcl.rmw_qos_reliability_policy_t) {
     system_Default = rcl.RMW_QOS_POLICY_RELIABILITY_SYSTEM_DEFAULT,
@@ -38,6 +39,7 @@ pub const Time = extern struct {
 };
 
 // TODO link where these defaults match the rcl
+// And test it
 pub const QosProfile = extern struct {
     history: QosHistoryPolicy = QosHistoryPolicy.keep_last,
     depth: usize = 10,
@@ -63,12 +65,11 @@ pub const QosProfile = extern struct {
     }
 };
 
-// TODO is remaking these enums in zig the best option?
 pub const UniqueNetworkFlowEndpointsRequirement = enum(c_uint) {
-    not_required = 0,
-    strictly_required = 1,
-    optionally_required = 2,
-    system_default = 3,
+    not_required = rcl.RMW_UNIQUE_NETWORK_FLOW_ENDPOINTS_NOT_REQUIRED,
+    strictly_required = rcl.RMW_UNIQUE_NETWORK_FLOW_ENDPOINTS_STRICTLY_REQUIRED,
+    optionally_required = rcl.RMW_UNIQUE_NETWORK_FLOW_ENDPOINTS_OPTIONALLY_REQUIRED,
+    system_default = rcl.RMW_UNIQUE_NETWORK_FLOW_ENDPOINTS_SYSTEM_DEFAULT,
 };
 
 pub const RmwEventCallback = ?*const fn (?*const anyopaque, usize) callconv(.C) void;
