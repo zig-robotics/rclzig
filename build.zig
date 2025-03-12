@@ -112,9 +112,9 @@ pub fn build(b: *std.Build) void {
     }
 
     zigros.linkRcl(ros_build.rclzig_module);
-    zigros.linkRcl(&exe.root_module);
-    zigros.linkRmwCycloneDds(&exe.root_module);
-    zigros.linkLoggerSpd(&exe.root_module);
+    zigros.linkRcl(exe.root_module);
+    zigros.linkRmwCycloneDds(exe.root_module);
+    zigros.linkLoggerSpd(exe.root_module);
 
     ros_build.addInterface("builtin_interfaces", zigros.ros_libraries.builtin_interfaces.share, &.{});
     ros_build.addInterface(
@@ -139,7 +139,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize, // TODO should this be debug always?
     });
     string_tests.linkLibC();
-    zigros.linkRcl(&string_tests.root_module);
+    zigros.linkRcl(string_tests.root_module);
 
     if (coverage) {
         string_tests.setExecCmd(&.{
@@ -156,7 +156,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize, // TODO should this be debug always?
     });
     sequence_tests.linkLibC();
-    zigros.linkRcl(&sequence_tests.root_module);
+    zigros.linkRcl(sequence_tests.root_module);
 
     if (coverage) {
         sequence_tests.setExecCmd(&.{

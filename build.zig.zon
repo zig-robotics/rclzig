@@ -1,10 +1,12 @@
 .{
-    .name = "rclzig",
+    .name = .rclzig,
     .version = "0.1.0",
+    .minimum_zig_version = "0.14.0",
+    .fingerprint = 0x66c581dc49f75aa3, // Changing this has security and trust implications.
     .dependencies = .{
         .zigros = .{
-            .url = "https://github.com/zig-robotics/zigros/archive/refs/tags/v0.1.0.tar.gz",
-            .hash = "12201d34f6ffa34e2451af00e279c5582b2b5b7861f60e2cb19f9e2c4791194a29ca",
+            .url = "https://github.com/zig-robotics/zigros/archive/refs/tags/v0.2.0.tar.gz",
+            .hash = "zigros-0.2.0-Bs9PQElmAgCrxjXpUHJvRiyhBa-G-8fmf36f6LfCiqtd",
         },
     },
     .paths = .{

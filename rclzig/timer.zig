@@ -9,7 +9,7 @@ const time = @import("time.zig");
 pub fn Timer(callback: anytype) type {
     const CallbackT = @TypeOf(callback);
     const CircumstanceT = switch (@typeInfo(CallbackT)) {
-        .Fn => |f| if (f.params.len == 0)
+        .@"fn" => |f| if (f.params.len == 0)
             void
         else if (f.params.len == 1)
             if (f.params[0].type) |T|

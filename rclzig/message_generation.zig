@@ -139,7 +139,16 @@ const DataEntries = struct {
         return to_return;
     }
 
-    pub fn addEntry(self: *Self, allocator: std.mem.Allocator, data_type: Entry.Type, array_type_in: ?Entry.ArrayType, is_constant: bool, name: []const u8, default_in: ?[]const u8) !void {
+    pub fn addEntry(
+        self: *Self,
+        allocator: std.mem.Allocator,
+        data_type: Entry.Type,
+        array_type_in: ?Entry.ArrayType,
+        is_constant: bool,
+        name: []const u8,
+        default_in: ?[]const u8,
+        loaded_messages: *const std.StringArrayHashMap(*DataEntries),
+    ) !void {
         var new_entry = try self.entries.addOne(allocator);
         new_entry.* = .{
             .data_type = data_type,
@@ -158,6 +167,7 @@ const DataEntries = struct {
                     try result.appendSlice(allocator, "[ ");
                     for (0..array_type.size) |_| {
                         switch (data_type) {
+                            // TODO check if init is required?
                             .complex_type => try result.appendSlice(allocator, ".{}, "),
                             .base_type => |base_type| switch (base_type.zigType()) {
                                 .bool => try result.appendSlice(allocator, "false, "),
@@ -178,7 +188,7 @@ const DataEntries = struct {
                     .RosString => new_entry.default = "",
                     else => new_entry.default = "0",
                 },
-                .complex_type => new_entry.default = ".{}",
+                .complex_type => |t| new_entry.default = if (loaded_messages.get(t).?.initRequired(loaded_messages)) "" else ".{}",
             }
         }
     }
@@ -187,7 +197,7 @@ const DataEntries = struct {
         var result = std.ArrayListUnmanaged(u8){};
         var writer = result.writer(allocator);
         var imports = std.StringHashMap(void).init(allocator);
-        const rcl_allocator_import = "const RclAllocator = @import(\"rclzig\").RclAllocator;\n";
+        // const rcl_allocator_import = "const RclAllocator = @import(\"rclzig\").RclAllocator;\n";
         for (self.entries.items) |entry| {
             if (entry.array_type) |array_type| {
                 switch (array_type.kind) {
@@ -197,17 +207,18 @@ const DataEntries = struct {
                             try imports.put(sequence_import, void{});
                             try writer.writeAll(sequence_import);
                         }
-                        if (!imports.contains(rcl_allocator_import)) {
-                            try imports.put(rcl_allocator_import, void{});
-                            try writer.writeAll(rcl_allocator_import);
-                        }
+                        // TODO remove after test
+                        // if (!imports.contains(rcl_allocator_import)) {
+                        //     try imports.put(rcl_allocator_import, void{});
+                        //     try writer.writeAll(rcl_allocator_import);
+                        // }
                     },
                     .static_array => {},
                 }
             }
             switch (entry.data_type) {
                 .complex_type => |data_type| {
-                    var package_it = std.mem.tokenizeAny(u8, data_type, ".");
+                    var package_it = std.mem.tokenizeScalar(u8, data_type, '.');
                     const package = package_it.next().?;
                     if (!imports.contains(package)) {
                         try imports.put(package, void{});
@@ -221,10 +232,11 @@ const DataEntries = struct {
                             try imports.put(string_import, void{});
                             try writer.writeAll(string_import);
                         }
-                        if (!imports.contains(rcl_allocator_import)) {
-                            try imports.put(rcl_allocator_import, void{});
-                            try writer.writeAll(rcl_allocator_import);
-                        }
+                        // TODO remove after test
+                        // if (!imports.contains(rcl_allocator_import)) {
+                        //     try imports.put(rcl_allocator_import, void{});
+                        //     try writer.writeAll(rcl_allocator_import);
+                        // }
                     },
                     else => {},
                 },
@@ -248,10 +260,10 @@ const DataEntries = struct {
                 if (entry.array_type) |array_type| {
                     switch (array_type.kind) {
                         .unbounded_dynamic_array => {
-                            try writer.print("Sequence({s}, null) = .{{}},\n", .{entry.data_type.name()});
+                            try writer.print("Sequence({s}, null) = .empty,\n", .{entry.data_type.name()});
                         },
                         .bounded_dynamic_array => {
-                            try writer.print("Sequence({s}, {}) = .{{}},\n", .{ entry.data_type.name(), array_type.size });
+                            try writer.print("Sequence({s}, {}) = .empty,\n", .{ entry.data_type.name(), array_type.size });
                         },
                         .static_array => {
                             try writer.print("[{[size]}]{[type]s} = [_]{[type]s}{{ ", .{ .size = array_type.size, .type = entry.data_type.name() });
@@ -269,10 +281,14 @@ const DataEntries = struct {
                     }
                 } else switch (entry.data_type) {
                     .base_type => |data_type| switch (data_type) {
-                        .string => try writer.print("{s} = .{{}},\n", .{entry.data_type.name()}),
+                        // TODO if there's a string, this must be called via init and should not have a default
+                        .string => try writer.print("{s},\n", .{entry.data_type.name()}),
                         else => try writer.print("{s} = {s},\n", .{ entry.data_type.name(), entry.default }),
                     },
-                    else => try writer.print("{s} = {s},\n", .{ entry.data_type.name(), entry.default }),
+                    else => if (entry.default.len == 0)
+                        try writer.print("{s},\n", .{entry.data_type.name()})
+                    else
+                        try writer.print("{s} = {s},\n", .{ entry.data_type.name(), entry.default }),
                 }
             }
         }
@@ -284,17 +300,52 @@ const DataEntries = struct {
         var writer = result.writer();
 
         try writer.writeAll("    pub fn init(allocator: anytype) !Self {\n");
-        try writer.writeAll("        var return_value: Self = .{};\n");
-
+        try writer.writeAll("        var return_value: Self = .{\n");
+        for (self.entries.items) |entry| if (!entry.is_constant) {
+            if (entry.array_type) |array_type| switch (array_type.kind) {
+                else => {},
+                //     .static_array => switch (entry.data_type) {
+                //         .complex_type => |data_type| if (loaded_messages.get(data_type).?.initRequired(loaded_messages)) {
+                //             // TODO in zig 0.14 this can be made nicer with just '.init(allocator);'
+                //             try writer.print("        for(return_value.{s}) |*entry| entry.* = try {s}.init(allocator);\n", .{ entry.name, data_type });
+                //         },
+                //         .base_type => |data_type| switch (data_type.zigType()) {
+                //             .RosString => try writer.print("        for(return_value.{s}) |*entry| entry.* = try RosString.init(allocator);\n", .{entry.name}),
+                //             else => {},
+                //         },
+                //     },
+                //     .unbounded_dynamic_array, .bounded_dynamic_array => {
+                //         var token_it = std.mem.tokenizeAny(u8, entry.default, "[ ,]");
+                //         // TODO switch to assign? (don't individually append)
+                //         while (token_it.next()) |token| {
+                //             try writer.print("        return_value.{s}.append(allocator, {s});\n", .{ entry.name, token });
+                //         }
+                //     },
+                //     .bounded_string => {}, // TODO bounded strings
+            } else switch (entry.data_type) {
+                .complex_type => |data_type| {
+                    if (loaded_messages.get(data_type).?.initRequired(loaded_messages)) {
+                        try writer.print("            .{s} = undefined,\n", .{entry.name});
+                    }
+                },
+                .base_type => |data_type| switch (data_type.zigType()) {
+                    .RosString => {
+                        try writer.print("            .{s} = .uninitialized,\n", .{entry.name});
+                    },
+                    else => {},
+                },
+            }
+        };
+        try writer.writeAll("        };\n");
         for (self.entries.items) |entry| if (!entry.is_constant) {
             if (entry.array_type) |array_type| switch (array_type.kind) {
                 .static_array => switch (entry.data_type) {
+                    // TODO figure out errdefer deinit on members?
                     .complex_type => |data_type| if (loaded_messages.get(data_type).?.initRequired(loaded_messages)) {
-                        // TODO in zig 0.14 this can be made nicer with just '.init(allocator);'
-                        try writer.print("        for(return_value.{s}) |*entry| entry.* = try {s}.init(allocator);\n", .{ entry.name, data_type });
+                        try writer.print("        for(return_value.{s}) |*entry| entry.* = try .init(allocator);\n", .{entry.name});
                     },
                     .base_type => |data_type| switch (data_type.zigType()) {
-                        .RosString => try writer.print("        for(return_value.{s}) |*entry| entry.* = try RosString.init(allocator);\n", .{entry.name}),
+                        .RosString => try writer.print("        for(return_value.{s}) |*entry| entry.* = try .init(allocator);\n", .{entry.name}),
                         else => {},
                     },
                 },
@@ -309,15 +360,18 @@ const DataEntries = struct {
             } else switch (entry.data_type) {
                 .complex_type => |data_type| {
                     if (loaded_messages.get(data_type).?.initRequired(loaded_messages)) {
-                        // TODO This could be more better in 0.14 with just a call to '.init(allocator)'
-                        try writer.print("        return_value.{s} = try {s}.init(allocator);\n", .{ entry.name, data_type });
+                        try writer.print("        return_value.{s} = try .init(allocator);\n", .{entry.name});
+                        if (loaded_messages.get(data_type).?.deinitRequired(loaded_messages)) {
+                            try writer.print("        errdefer return_value.{s}.deinit(allocator);\n", .{entry.name});
+                        }
                     }
                 },
                 .base_type => |data_type| switch (data_type.zigType()) {
                     .RosString => {
-                        try writer.print("        return_value.{s} = try RosString.init(allocator);\n", .{entry.name});
+                        try writer.print("        return_value.{s} = try .init(allocator);\n", .{entry.name});
+                        try writer.print("        errdefer return_value.{s}.deinit(allocator);\n", .{entry.name});
                         if (entry.default.len > 0) {
-                            try writer.print("        return_value.{s}.assign(allocator, {s});\n", .{ entry.name, entry.default });
+                            try writer.print("        try return_value.{s}.assign(allocator, {s});\n", .{ entry.name, entry.default });
                         }
                     },
                     else => {},
@@ -438,7 +492,7 @@ const DataEntries = struct {
         source_package: []const u8,
         dependencies: *const std.StringArrayHashMap([]const u8),
     ) !void {
-        var line_it = std.mem.tokenizeAny(u8, line, " "); // we can't tokenize on = because its used to declare bounded arrays
+        var line_it = std.mem.tokenizeScalar(u8, line, ' '); // we can't tokenize on = because its used to declare bounded arrays
         const data_type_optional = line_it.next();
         var data_type_str: []const u8 = undefined;
         if (data_type_optional) |data_type_real| {
@@ -452,7 +506,7 @@ const DataEntries = struct {
             return;
         }
 
-        inline for (@typeInfo(DataEntries.Entry.BaseType).Enum.fields) |field| {
+        inline for (@typeInfo(DataEntries.Entry.BaseType).@"enum".fields) |field| {
             if (std.mem.startsWith(u8, data_type_str, field.name)) {
                 new_type_optional = @enumFromInt(field.value);
             }
@@ -558,7 +612,7 @@ const DataEntries = struct {
             } else if (new_is_constant) {
                 // TODO Constants must have a value, this is an error
             }
-            try self.addEntry(allocator, new_type, new_array_type, new_is_constant, new_name, new_value);
+            try self.addEntry(allocator, new_type, new_array_type, new_is_constant, new_name, new_value, loaded_messages);
         }
     }
     entries: std.ArrayListUnmanaged(Entry),
@@ -602,7 +656,7 @@ fn loadRosMessage(
 ) LoadRosMessageError!*DataEntries {
     var msg_str: ?[]const u8 = null;
 
-    var msg_it = std.mem.tokenizeAny(u8, msg_path, "/");
+    var msg_it = std.mem.tokenizeScalar(u8, msg_path, '/');
 
     while (msg_it.next()) |token| {
         msg_str = token;
@@ -625,7 +679,7 @@ fn loadRosMessage(
 
     const msg_data = try msg.readToEndAlloc(allocator, std.math.maxInt(usize));
 
-    var data_it = std.mem.split(u8, msg_data, "\n");
+    var data_it = std.mem.splitScalar(u8, msg_data, '\n');
     while (data_it.next()) |line| {
         try data_entries.addLine(allocator, loaded_messages, line, package_name, dependencies);
     }
@@ -642,7 +696,7 @@ fn loadRosMessage(
 // existing ROS install. It assumes that search paths has the same format as AMENT_PREFIX_PATH
 // Callee is responsible for the returned memory
 fn searchForPackageInShare(allocator: std.mem.Allocator, package_name: []const u8, search_paths: []const u8) ![]const u8 {
-    var search_paths_it = std.mem.tokenizeAny(u8, search_paths, ":");
+    var search_paths_it = std.mem.tokenizeScalar(u8, search_paths, ':');
 
     while (search_paths_it.next()) |path| {
         const share_path = try std.fmt.allocPrint(allocator, "{s}/share", .{path});
@@ -700,7 +754,7 @@ pub fn main() !u8 {
     if (args.len > 4) {
         for (args[4..]) |arg| {
             if (arg.len > 2 and std.mem.eql(u8, arg[0..2], "-D")) {
-                var it = std.mem.tokenizeAny(u8, arg[2..], ":");
+                var it = std.mem.tokenizeScalar(u8, arg[2..], ':');
                 const dep_name = it.next() orelse return error.EmptyDependencyArgument;
                 const dep_path = it.next() orelse {
                     std.log.err(

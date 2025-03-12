@@ -11,13 +11,15 @@ const std = @import("std");
 // rcl allocator (or whatever allocator the rmw is using, in pretty much all cases its just malloc)
 pub const RosString = extern struct {
     const Self = @This();
-    data: [*]u8 = undefined,
-    size: usize = 0,
-    capacity: usize = 0,
-    // TODO non trivial ROS messages (fields that need init called) probably shouldn't allow for defaults
-    // data: [*]u8,
-    // size: usize,
-    // capacity: usize,
+    data: [*]u8,
+    size: usize,
+    capacity: usize,
+
+    pub const uninitialized = Self{
+        .data = undefined,
+        .size = 0,
+        .capacity = 0,
+    };
 
     pub fn init(allocator: anytype) !Self {
         var return_type = Self{
@@ -33,8 +35,7 @@ pub const RosString = extern struct {
         if (self.capacity > 0) {
             allocator.free(self.data[0..self.capacity]);
         }
-        self.capacity = 0;
-        self.size = 0;
+        self.* = .uninitialized;
     }
 
     pub fn asSlice(self: *const Self) []u8 {

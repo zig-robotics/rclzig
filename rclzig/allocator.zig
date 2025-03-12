@@ -116,9 +116,9 @@ pub const RclAllocator = extern struct {
     }
 
     pub fn free(self: *const Self, memory: anytype) void {
-        const Slice = @typeInfo(@TypeOf(memory)).Pointer;
+        const Slice = @typeInfo(@TypeOf(memory)).pointer;
         const bytes = std.mem.sliceAsBytes(memory);
-        const bytes_len = bytes.len + if (Slice.sentinel != null) @sizeOf(Slice.child) else 0;
+        const bytes_len = bytes.len + if (Slice.sentinel() != null) @sizeOf(Slice.child) else 0;
         if (bytes_len == 0) return;
         const non_const_ptr = @constCast(bytes.ptr);
         // TODO: https://github.com/ziglang/zig/issues/4298
@@ -138,7 +138,7 @@ pub const RclAllocator = extern struct {
     }
 
     pub fn destroy(self: Self, ptr: anytype) void {
-        const info = @typeInfo(@TypeOf(ptr)).Pointer;
+        const info = @typeInfo(@TypeOf(ptr)).pointer;
         if (info.size != .One) @compileError("ptr must be a single item pointer");
         const T = info.child;
         if (@sizeOf(T) == 0) return;
@@ -148,10 +148,10 @@ pub const RclAllocator = extern struct {
     }
 
     pub fn realloc(self: Self, old_mem: anytype, new_n: usize) t: {
-        const Slice = @typeInfo(@TypeOf(old_mem)).Pointer;
+        const Slice = @typeInfo(@TypeOf(old_mem)).pointer;
         break :t Error![]align(Slice.alignment) Slice.child;
     } {
-        const Slice = @typeInfo(@TypeOf(old_mem)).Pointer;
+        const Slice = @typeInfo(@TypeOf(old_mem)).pointer;
         const T = Slice.child;
         const bytes = std.mem.sliceAsBytes(old_mem);
         const non_const_ptr = @constCast(bytes.ptr);

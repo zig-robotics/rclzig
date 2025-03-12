@@ -45,7 +45,7 @@ fn SubscriptionCallback(comptime MsgT: type, comptime callback: anytype) type {
     };
     const CallbackT = @TypeOf(callback);
     const callback_info = switch (@typeInfo(CallbackT)) {
-        .Fn => |f| blk: {
+        .@"fn" => |f| blk: {
             if (f.params.len == 0) break :blk .{ .type = void, .signature = Signature.no_args };
             if (f.params.len == 1) {
                 if (f.params[0].type) |MT| if (MT == *const MsgT) {
@@ -128,25 +128,35 @@ pub fn Subscription(comptime MsgT: type, comptime callback: anytype) type {
             // TODO handle partial init
             if (CallbackT.stateful)
                 @compileError("Normal init called but callback prodvided requires a context pointer to bind to. Please use initBind instead");
-            return Self{
-                // RCL assumes zero init, we can't use zigs "undefined" to initialize or we get already init errors
+            var to_return = Self{
                 .subscription = try initSub(allocator, node, MsgT, topic_name, qos),
-                // .node = @ptrCast(&node.rcl_node),
-                .msg = .{}, // TODO msg should check if it needs init
+                .msg = undefined,
                 .callback = {},
             };
+            errdefer _ = rcl.rcl_subscription_fini(&to_return.subscription, @ptrCast(node));
+            to_return.msg = if (comptime std.meta.hasMethod(MsgT, "init")) try .init(allocator) else .{};
+
+            return to_return;
         }
 
-        pub fn initBind(allocator: rcl_allocator.RclAllocator, node: *Node, topic_name: [:0]const u8, qos: rmw.QosProfile, context: CallbackT.ContextT) !Self {
-            // TODO handle partial init
+        pub fn initBind(
+            allocator: rcl_allocator.RclAllocator,
+            node: *Node,
+            topic_name: [:0]const u8,
+            qos: rmw.QosProfile,
+            context: CallbackT.ContextT,
+        ) !Self {
             if (!CallbackT.stateful)
                 @compileError("Bind init called but callback prodvided is stateless. Please use init instead");
-            return Self{
-                // RCL assumes zero init, we can't use zigs "undefined" to initialize or we get already init errors
+            var to_return = Self{
                 .subscription = try initSub(allocator, node, MsgT, topic_name, qos),
-                .msg = .{},
+                .msg = undefined,
                 .callback = .{ .context = context },
             };
+            errdefer _ = rcl.rcl_subscription_fini(&to_return.subscription, @ptrCast(node));
+            to_return.msg = if (comptime std.meta.hasMethod(MsgT, "init")) try .init(allocator) else .{};
+
+            return to_return;
         }
 
         pub fn deinit(self: *Self, allocator: rcl_allocator.RclAllocator, node: *Node) void {

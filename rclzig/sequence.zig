@@ -7,9 +7,15 @@ const SequenceError = error{
 pub fn Sequence(comptime T: type, comptime upper_bound: ?usize) type {
     return extern struct {
         const Self = @This();
-        data: [*]T = undefined,
-        size: usize = 0,
-        capacity: usize = 0,
+        data: [*]T,
+        size: usize,
+        capacity: usize,
+
+        pub const empty = Self{
+            .data = undefined,
+            .size = 0,
+            .capacity = 0,
+        };
 
         pub fn deinit(self: *Self, allocator: anytype) void {
             if (comptime std.meta.hasMethod(T, "deinit"))
@@ -17,9 +23,8 @@ pub fn Sequence(comptime T: type, comptime upper_bound: ?usize) type {
 
             if (self.capacity > 0) {
                 allocator.free(self.data[0..self.capacity]);
-                self.size = 0;
-                self.capacity = 0;
             }
+            self.* = .empty;
         }
 
         // The sequence assumes ownership of any owned memory
@@ -104,9 +109,7 @@ pub fn Sequence(comptime T: type, comptime upper_bound: ?usize) type {
         // This clears the internal values so they can't be accidentally used again.
         pub fn toArrayList(self: *Self) std.ArrayListUnmanaged(T) {
             defer {
-                self.data = undefined;
-                self.size = 0;
-                self.capacity = 0;
+                self.* = .empty;
             }
             return .{
                 .items = self.asSlice(),
@@ -117,8 +120,7 @@ pub fn Sequence(comptime T: type, comptime upper_bound: ?usize) type {
         // Assumes ownership and clears the passed array list
         pub fn fromArrayList(list: *std.ArrayListUnmanaged(T)) Self {
             defer {
-                list.items = undefined;
-                list.capacity = 0;
+                list.* = .empty;
             }
             return .{
                 .data = list.items.ptr,
@@ -132,7 +134,7 @@ pub fn Sequence(comptime T: type, comptime upper_bound: ?usize) type {
 test "Test sequence zig allocator" {
     const allocator = std.testing.allocator;
 
-    var sequence = Sequence(u8, null){};
+    var sequence = Sequence(u8, null).empty;
     errdefer sequence.deinit(allocator);
     // empty deinit should be safe
     sequence.deinit(allocator);
@@ -145,7 +147,7 @@ test "Test sequence zig allocator" {
 
     sequence.deinit(allocator);
 
-    var array_list = std.ArrayListUnmanaged(u8){};
+    var array_list = std.ArrayListUnmanaged(u8).empty;
     try array_list.append(allocator, 4);
     try array_list.append(allocator, 3);
     try array_list.append(allocator, 2);
@@ -167,18 +169,17 @@ test "Test sequence zig allocator" {
     try array_list.append(allocator, 6);
     try array_list.append(allocator, 5);
 
-    sequence = Sequence(u8, null).fromArrayList(&array_list);
+    sequence = .fromArrayList(&array_list);
     try std.testing.expectEqual(0, array_list.capacity);
     try std.testing.expectEqualSlices(u8, sequence.asSlice(), &.{ 10, 9, 8, 7, 6, 5 });
     sequence.deinit(allocator);
 }
 
 test "Test sequence rcl allocator" {
-    // Test rcl allocator
     const RclAllocator = @import("./allocator.zig").RclAllocator;
     var allocator = std.testing.allocator;
     const rcl_allocator = RclAllocator.initFromZig(&allocator);
-    var sequence = Sequence(u8, null){};
+    var sequence = Sequence(u8, null).empty;
     errdefer sequence.deinit(rcl_allocator);
 
     try sequence.reserve(rcl_allocator, 6);
@@ -212,7 +213,7 @@ test "Test sequence with structure that requires init deinit" {
     };
     const allocator = std.testing.allocator;
 
-    var sequence = Sequence(TestStruct, null){};
+    var sequence = Sequence(TestStruct, null).empty;
     errdefer sequence.deinit(allocator);
 
     // deinit should be safe to call even on fresh structure
@@ -239,7 +240,7 @@ test "Test sequence with structure that requires init deinit" {
 test "Test bound sequence" {
     const allocator = std.testing.allocator;
     const BoundSequence = Sequence(u8, 4);
-    var sequence = BoundSequence{};
+    var sequence = BoundSequence.empty;
     errdefer sequence.deinit(allocator);
     // empty deinit should be safe
     sequence.deinit(allocator);
@@ -253,7 +254,7 @@ test "Test bound sequence" {
 
     sequence.deinit(allocator);
 
-    var array_list = std.ArrayListUnmanaged(u8){};
+    var array_list = std.ArrayListUnmanaged(u8).empty;
     defer array_list.deinit(allocator);
     try array_list.append(allocator, 5);
     try array_list.append(allocator, 4);

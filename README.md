@@ -10,6 +10,8 @@ If you're interested in working on it with me let me know and we can coordinate.
 
 So far there's a simple example of pups subs and timers working in the test project in `src/main.zig`.
 
+This currently works with zig 0.14.0 and ROS Jazzy.
+
 ## A bit of history
 
 This project started off by using Zigs translate-c functionality to convert a [node from the `rclc_examples` package](https://github.com/ros2/rclc/blob/iron/rclc_examples/src/example_short_timer_long_subscription.c).

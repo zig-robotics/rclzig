@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-pub const std_options = .{
+pub const std_options = std.Options{
     .log_level = switch (builtin.mode) {
         .Debug => .debug,
         else => .info,
@@ -178,8 +178,8 @@ const TestNodeSequences = struct {
     fn timerCallback(self: *Self) void {
         var array = self.msg.integer_array_value.toArrayList();
         array.appendSlice(self.allocator, &[_]i64{10} ** 1000000) catch @panic("OOM");
-        // TODO nicer zig 0.14 syntax
-        self.msg.integer_array_value = @TypeOf(self.msg.integer_array_value).fromArrayList(&array);
+
+        self.msg.integer_array_value = .fromArrayList(&array);
         std.log.info(
             "sequence timer\nmessage location: {*}\npointer location: {*}\nsize: {}\ncapacity: {}",
             .{
