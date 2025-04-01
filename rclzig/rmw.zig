@@ -17,20 +17,20 @@ pub const QosHistoryPolicy = enum(rcl.rmw_qos_history_policy_t) {
 };
 
 pub const QosDurabilityPolicy = enum(c_uint) {
-    system_default = 0,
-    transient_local = 1,
-    volatilee = 2,
-    unknown = 3,
-    best_available = 4,
+    system_default = rcl.RMW_QOS_POLICY_DURABILITY_SYSTEM_DEFAULT,
+    transient_local = rcl.RMW_QOS_POLICY_DURABILITY_TRANSIENT_LOCAL,
+    volatilee = rcl.RMW_QOS_POLICY_DURABILITY_VOLATILE,
+    unknown = rcl.RMW_QOS_POLICY_DURABILITY_UNKNOWN,
+    best_available = rcl.RMW_QOS_POLICY_DURABILITY_BEST_AVAILABLE,
 };
 
 pub const QosLivelinessPolicy = enum(c_uint) {
-    system_default = 0,
-    automatic = 1,
-    manual_by_node = 2,
-    manual_by_topic = 3,
-    unknown = 4,
-    best_available = 5,
+    system_default = rcl.RMW_QOS_POLICY_LIVELINESS_SYSTEM_DEFAULT,
+    automatic = rcl.RMW_QOS_POLICY_LIVELINESS_AUTOMATIC,
+    manual_by_node = rcl.RMW_QOS_POLICY_LIVELINESS_MANUAL_BY_NODE,
+    manual_by_topic = rcl.RMW_QOS_POLICY_LIVELINESS_MANUAL_BY_TOPIC,
+    unknown = rcl.RMW_QOS_POLICY_LIVELINESS_UNKNOWN,
+    best_available = rcl.RMW_QOS_POLICY_LIVELINESS_BEST_AVAILABLE,
 };
 
 pub const Time = extern struct {
@@ -38,8 +38,7 @@ pub const Time = extern struct {
     nsec: u64,
 };
 
-// TODO link where these defaults match the rcl
-// And test it
+// Defaults match: https://github.com/ros2/rmw/blob/jazzy/rmw/include/rmw/qos_profiles.h#L51
 pub const QosProfile = extern struct {
     history: QosHistoryPolicy = QosHistoryPolicy.keep_last,
     depth: usize = 10,
@@ -64,6 +63,13 @@ pub const QosProfile = extern struct {
         return @ptrCast(self);
     }
 };
+
+test "test qos default" {
+    const std = @import("std");
+    const rcl_default = rcl.rmw_qos_profile_default;
+    const rclzig_default = QosProfile{};
+    try std.testing.expectEqualSlices(u8, std.mem.asBytes(&rcl_default), std.mem.asBytes(&rclzig_default));
+}
 
 pub const UniqueNetworkFlowEndpointsRequirement = enum(c_uint) {
     not_required = rcl.RMW_UNIQUE_NETWORK_FLOW_ENDPOINTS_NOT_REQUIRED,

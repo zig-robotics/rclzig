@@ -6,10 +6,6 @@ const Node = @import("node.zig").Node;
 const rmw = @import("rmw.zig");
 const rcl_error = @import("error.zig");
 
-// pub fn SubscriptionCallback(comptime T: type) type {
-//     return *const fn (msg: T) anyerror!void;
-// }
-
 fn initSub(
     allocator: rcl_allocator.RclAllocator,
     node: *Node,
@@ -36,6 +32,7 @@ fn initSub(
 
     return subscription;
 }
+
 // The callback should be directly a function
 fn SubscriptionCallback(comptime MsgT: type, comptime callback: anytype) type {
     const Signature = enum {
@@ -118,14 +115,12 @@ pub fn Subscription(comptime MsgT: type, comptime callback: anytype) type {
         msg: MsgT, // TODO this isn't technically needed, but is nice for static implementations. Consider adding a verion that uses a heap pointer?
         callback: if (CallbackT.stateful) CallbackT else void,
 
-        // TODO decide if we want to allow callbacks to error. if we do, it should probably be a limited set dictated here otherwise the executor has no way to handle them (OOM for example? maybe we don't allow callbacks to allocate?)
         pub fn init(
             allocator: rcl_allocator.RclAllocator,
             node: *Node,
             topic_name: [:0]const u8,
             qos: rmw.QosProfile,
         ) !Self {
-            // TODO handle partial init
             if (CallbackT.stateful)
                 @compileError("Normal init called but callback prodvided requires a context pointer to bind to. Please use initBind instead");
             var to_return = Self{

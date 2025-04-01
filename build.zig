@@ -1,7 +1,7 @@
 const std = @import("std");
 const ZigRos = @import("zigros").ZigRos;
 
-const RclzigBuild = struct {
+pub const RclzigBuild = struct {
     const Self = @This();
     pub fn init(allocator: std.mem.Allocator, b: *std.Build) Self {
         const return_value = Self{
@@ -112,9 +112,11 @@ pub fn build(b: *std.Build) void {
     }
 
     zigros.linkRcl(ros_build.rclzig_module);
-    zigros.linkRcl(exe.root_module);
-    zigros.linkRmwCycloneDds(exe.root_module);
-    zigros.linkLoggerSpd(exe.root_module);
+    zigros.linkRmwCycloneDds(ros_build.rclzig_module);
+    zigros.linkLoggerSpd(ros_build.rclzig_module);
+    // zigros.linkRcl(exe.root_module);
+    // zigros.linkRmwCycloneDds(exe.root_module);
+    // zigros.linkLoggerSpd(exe.root_module);
 
     ros_build.addInterface("builtin_interfaces", zigros.ros_libraries.builtin_interfaces.share, &.{});
     ros_build.addInterface(
@@ -165,7 +167,16 @@ pub fn build(b: *std.Build) void {
             null,
         });
     }
+
     test_step.dependOn(&b.addRunArtifact(sequence_tests).step);
+    const rmw_tests = b.addTest(.{
+        .root_source_file = b.path("rclzig/rmw.zig"),
+        .target = target,
+        .optimize = optimize, // TODO should this be debug always?
+    });
+    rmw_tests.linkLibC();
+    zigros.linkRcl(rmw_tests.root_module);
+    test_step.dependOn(&b.addRunArtifact(rmw_tests).step);
 
     b.installArtifact(exe);
 
