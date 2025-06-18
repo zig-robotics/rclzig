@@ -2,4 +2,5 @@
 // This keeps the rclzig interface cleaner
 pub const rcl = @cImport({
     @cInclude("rcl/rcl.h");
+    @cInclude("rcl/graph.h");
 });

@@ -63,3 +63,26 @@ Currently the RMW has no way to accept the allocator.
 This means that any dynamic memory that crosses that boundary must use an allocator compatible with your RMW (almost always raw malloc and friends).
 Specifically, any memory that interacts with an `rmw_take` call should use the default rcl allocator, accesible via `getDefaultRclAllocator`.
 RCL allocators using a backing zig allocator should not be used to cross the RMW boundary.
+
+
+TODO
+
+// Sync requests should work from anywhere if possible (no deadlock in single threaded executors?)
+response = try client.send_request(request);
+
+// if we take a callback do we need a future?
+future = try client.async_send_request(request, callback);
+
+// Add timeouts?
+// timeout_struct = .{duration, callback}
+future = try client.async_send_request_timeout(request, callback, timeout_struct);
+
+
+// OR all async calls just take a struct?
+struct {
+  callack: ?callback
+  timeout: ?duration
+  timeout_callback: ? timeout_callback
+}
+
+future = try client.async_send_request(request, .{});

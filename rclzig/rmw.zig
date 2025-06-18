@@ -59,6 +59,27 @@ pub const QosProfile = extern struct {
     },
     avoid_ros_namespace_conventions: bool = false,
 
+    pub const services_default = QosProfile{
+        .history = QosHistoryPolicy.keep_last,
+        .depth = 10,
+        .reliability = QosReliabilityPolicy.reliable,
+        .durability = QosDurabilityPolicy.volatilee,
+        .deadline = .{
+            .sec = 0,
+            .nsec = 0,
+        },
+        .lifespan = .{
+            .sec = 0,
+            .nsec = 0,
+        },
+        .liveliness = QosLivelinessPolicy.system_default,
+        .liveliness_lease_duration = .{
+            .sec = 0,
+            .nsec = 0,
+        },
+        .avoid_ros_namespace_conventions = false,
+    };
+
     pub fn rcl(self: *const QosProfile) *const @import("rcl.zig").rcl.rmw_qos_profile_t {
         return @ptrCast(self);
     }
@@ -68,6 +89,13 @@ test "test qos default" {
     const std = @import("std");
     const rcl_default = rcl.rmw_qos_profile_default;
     const rclzig_default = QosProfile{};
+    try std.testing.expectEqualSlices(u8, std.mem.asBytes(&rcl_default), std.mem.asBytes(&rclzig_default));
+}
+
+test "test qos services default" {
+    const std = @import("std");
+    const rcl_default = rcl.rmw_qos_profile_services_default;
+    const rclzig_default = QosProfile.services_default;
     try std.testing.expectEqualSlices(u8, std.mem.asBytes(&rcl_default), std.mem.asBytes(&rclzig_default));
 }
 

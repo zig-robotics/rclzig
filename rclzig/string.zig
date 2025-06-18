@@ -107,6 +107,12 @@ pub const RosString = extern struct {
             .capacity = owned.len + 1,
         };
     }
+
+    pub fn fromSliceCopy(allocator: anytype, slice: []const u8) !Self {
+        var to_return = try Self.init(allocator);
+        try to_return.appendSlice(allocator, slice);
+        return to_return;
+    }
 };
 
 test "test ros string" {
@@ -167,5 +173,9 @@ test "test ros string" {
     const c_string = try allocator.dupeZ(u8, "goodbye");
     string = RosString.fromOwnedSliceSentinel(c_string);
     try std.testing.expectEqualSentinel(u8, 0, "goodbye", string.asSliceSentinel());
+    string.deinit(allocator);
+
+    string = try .fromSliceCopy(allocator, "beep");
+    try std.testing.expectEqualSentinel(u8, 0, "beep", string.asSliceSentinel());
     string.deinit(allocator);
 }

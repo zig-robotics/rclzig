@@ -2,7 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 const sequence = @import("sequence.zig");
-const file_format =
+const msg_file_format =
     \\const std = @import("std");
     \\const rosidl_runtime = @import("rclzig").rosidl_runtime;
     \\{[additional_imports]s}
@@ -18,6 +18,55 @@ const file_format =
     \\        return rosidl_typesupport_c__get_message_type_support_handle__{[package_name]s}__msg__{[msg_type]s}();
     \\    }}
     \\}};
+;
+
+const request_file_format =
+    \\const std = @import("std");
+    \\const rosidl_runtime = @import("rclzig").rosidl_runtime;
+    \\{[additional_imports]s}
+    \\
+    \\extern fn rosidl_typesupport_c__get_message_type_support_handle__{[package_name]s}__msg__{[msg_type]s}_Request() *const rosidl_runtime.RosidlMessageTypeSupport;
+    \\
+    \\pub const {[msg_type]s}Request = extern struct {{
+    \\    const Self = @This();
+    \\{[struct_payload]s}
+    \\{[init_body]s}
+    \\{[deinit_body]s}
+    \\    pub fn getTypeSupportHandle() *const rosidl_runtime.RosidlMessageTypeSupport {{
+    \\        return rosidl_typesupport_c__get_message_type_support_handle__{[package_name]s}__msg__{[msg_type]s}_Request();
+    \\    }}
+    \\}};
+;
+
+const response_file_format =
+    \\const std = @import("std");
+    \\const rosidl_runtime = @import("rclzig").rosidl_runtime;
+    \\{[additional_imports]s}
+    \\
+    \\extern fn rosidl_typesupport_c__get_message_type_support_handle__{[package_name]s}__msg__{[msg_type]s}_Response() *const rosidl_runtime.RosidlMessageTypeSupport;
+    \\
+    \\pub const {[msg_type]s}Response = extern struct {{
+    \\    const Self = @This();
+    \\{[struct_payload]s}
+    \\{[init_body]s}
+    \\{[deinit_body]s}
+    \\    pub fn getTypeSupportHandle() *const rosidl_runtime.RosidlMessageTypeSupport {{
+    \\        return rosidl_typesupport_c__get_message_type_support_handle__{[package_name]s}__msg__{[msg_type]s}_Response();
+    \\    }}
+    \\}};
+;
+
+const service_struct_format =
+    \\const rosidl_runtime = @import("rclzig").rosidl_runtime;
+    \\
+    \\extern fn rosidl_typesupport_c__get_service_type_support_handle__{[package_name]s}__srv__{[srv_type]s}() *const rosidl_runtime.RosidlServiceTypeSupport;
+    \\
+    \\pub const Request = @import("{[srv_type]s}Request.zig").{[srv_type]s}Request;
+    \\pub const Response = @import("{[srv_type]s}Response.zig").{[srv_type]s}Response;
+    \\
+    \\pub fn getTypeSupportHandle() *const rosidl_runtime.RosidlServiceTypeSupport {{
+    \\    return rosidl_typesupport_c__get_service_type_support_handle__{[package_name]s}__srv__{[srv_type]s}();
+    \\}}
 ;
 
 // TODO: general things that are still missing
@@ -544,7 +593,7 @@ const DataEntries = struct {
             );
             // Just need to make sure the message is loaded for later use, do nothing with the result.
             const dependency = loaded_messages.get(new_type.complex_type) orelse
-                try loadRosMessage(allocator, loaded_messages, new_type_path, package, dependencies);
+                try loadMessage(allocator, loaded_messages, new_type_path, package, dependencies);
             try self.dependencies.put(allocator, dependency.key, {});
             // catch |err| switch (err) {
             // TODO this logic is for the search paths version, add back in when readding search paths.
@@ -647,7 +696,7 @@ const LoadRosMessageError = error{
 } || std.mem.Allocator.Error || std.fmt.AllocPrintError || std.fs.Dir.Iterator.Error || std.fmt.ParseIntError || std.fs.File.OpenError || std.fs.File.ReadError;
 // TODO figure out error set buisness. above is a lazy list of all possible erros thrown with basic trys.
 // Some of these probably make sense to aliase to more generic laond message error (parse int error for example doesn't mean much, while allocator does. File not found errors should be made more specific. "cant find package" "cant find message", etc)
-fn loadRosMessage(
+fn loadMessage(
     allocator: std.mem.Allocator,
     loaded_messages: *std.StringArrayHashMap(*DataEntries),
     msg_path: []const u8,
@@ -669,7 +718,6 @@ fn loadRosMessage(
     const msg_name = msg_str.?[0 .. msg_str.?.len - ".msg".len];
 
     var data_entries = try DataEntries.create(allocator, msg_name, package_name);
-    try loaded_messages.put(data_entries.key, data_entries);
 
     var msg = std.fs.openFileAbsolute(msg_path, .{}) catch |err| {
         std.log.err("couldn't open file: {s}", .{msg_path});
@@ -684,12 +732,71 @@ fn loadRosMessage(
         try data_entries.addLine(allocator, loaded_messages, line, package_name, dependencies);
     }
 
+    // TODO test moving this against an invalidated cache (or with unit tests)
+    try loaded_messages.put(data_entries.key, data_entries);
+
     // Open directory using standard pattern {searchpath}/share/{package name}/msg/{message name}
 
     // Copy loading from main, stripping the file writting for now
 
     // return data entries.
     return data_entries;
+}
+
+const ServiceEntries = struct {
+    request: *DataEntries,
+    response: *DataEntries,
+};
+
+fn loadService(
+    allocator: std.mem.Allocator,
+    loaded_messages: *std.StringArrayHashMap(*DataEntries),
+    srv_path: []const u8,
+    package_name: []const u8,
+    dependencies: *const std.StringArrayHashMap([]const u8),
+) !ServiceEntries {
+    var srv_str: ?[]const u8 = null;
+
+    var srv_it = std.mem.tokenizeScalar(u8, srv_path, '/');
+
+    while (srv_it.next()) |token| {
+        srv_str = token;
+    }
+    if (srv_str == null) {
+        return error.MalformedServiceInputError;
+    }
+
+    if (srv_str.?.len <= ".srv".len) return error.MalformedServiceInputError;
+    const msg_name = srv_str.?[0 .. srv_str.?.len - ".srv".len];
+
+    var request_entries = try DataEntries.create(allocator, msg_name, package_name);
+    var response_entries = try DataEntries.create(allocator, msg_name, package_name);
+
+    var msg = std.fs.openFileAbsolute(srv_path, .{}) catch |err| {
+        std.log.err("couldn't open file: {s}", .{srv_path});
+        return err;
+    };
+    defer msg.close();
+
+    const srv_data = try msg.readToEndAlloc(allocator, std.math.maxInt(usize));
+    var request_response_it = std.mem.splitSequence(u8, srv_data, "---");
+
+    var request_it = std.mem.splitScalar(u8, request_response_it.first(), '\n');
+    while (request_it.next()) |line| {
+        try request_entries.addLine(allocator, loaded_messages, line, package_name, dependencies);
+    }
+
+    var response_it = std.mem.splitScalar(u8, request_response_it.rest(), '\n');
+    while (response_it.next()) |line| {
+        try response_entries.addLine(allocator, loaded_messages, line, package_name, dependencies);
+    }
+
+    // Open directory using standard pattern {searchpath}/share/{package name}/msg/{message name}
+
+    // Copy loading from main, stripping the file writting for now
+
+    // return data entries.
+    return .{ .request = request_entries, .response = response_entries };
 }
 
 // Search a colon separated list of directories. This should be called when building against an
@@ -786,76 +893,204 @@ pub fn main() !u8 {
     var base_dir = try std.fs.openDirAbsolute(input_base, .{});
     defer base_dir.close();
 
-    // Its not guarenteed that we need to create each dir
-    const output_msg_dir_path = try std.fmt.allocPrint(allocator, "{s}/msg", .{output_module_path});
-
-    std.debug.print("creating: {s}", .{output_msg_dir_path});
-    std.fs.makeDirAbsolute(output_msg_dir_path) catch |err| switch (err) {
-        error.PathAlreadyExists => {},
-        else => return err,
-    };
-    var output_msg_dir = try std.fs.openDirAbsolute(output_msg_dir_path, .{});
-    defer output_msg_dir.close();
-
     var output_module = std.ArrayList(u8).init(allocator);
-
-    try output_module.appendSlice("pub const msg = struct {\n");
-    var output_module_writer = output_module.writer();
-
-    // This assumes that there's a msg dir
     // TODO srv and actions?
     const msg_path = try std.fmt.allocPrint(allocator, "{s}/msg", .{input_base});
 
-    var msg_dir = try base_dir.openDir(msg_path, .{ .iterate = true });
-    defer msg_dir.close();
-    var msg_dir_it = msg_dir.iterate();
-    while (try msg_dir_it.next()) |msg_file| {
-        const msg_str = msg_file.name;
-        if (msg_str.len > 3 and std.mem.eql(u8, msg_str[msg_str.len - 3 .. msg_str.len], "msg")) {
-            const path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ msg_path, msg_file.name });
+    // var msg_dir = try base_dir.openDir(msg_path, .{ .iterate = true });
+    if (base_dir.openDir(msg_path, .{ .iterate = true })) |msg_dir_in| {
+        var msg_dir = msg_dir_in; // TODO this is to remove the constness of the capture. seems odd that the captured value is forced const? even if caught by reference?
+        const output_msg_dir_path = try std.fmt.allocPrint(allocator, "{s}/msg", .{output_module_path});
 
-            var data_entries = try loadRosMessage(allocator, &loaded_messages, path, package_name, &dependencies);
-            const zig_msg_str = try std.fmt.allocPrint(allocator, "{s}.zig", .{msg_str[0 .. msg_str.len - 4]});
+        std.debug.print("creating: {s}", .{output_msg_dir_path});
+        std.fs.makeDirAbsolute(output_msg_dir_path) catch |err| switch (err) {
+            error.PathAlreadyExists => {},
+            else => return err,
+        };
+        var output_msg_dir = try std.fs.openDirAbsolute(output_msg_dir_path, .{});
+        defer output_msg_dir.close();
+        try output_module.appendSlice("pub const msg = struct {\n");
+        var output_module_writer = output_module.writer();
+        defer msg_dir.close();
+        var msg_dir_it = msg_dir.iterate();
+        while (try msg_dir_it.next()) |msg_file| {
+            const msg_str = msg_file.name;
+            if (msg_str.len > 3 and std.mem.eql(u8, msg_str[msg_str.len - 3 .. msg_str.len], "msg")) {
+                const path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ msg_path, msg_file.name });
 
-            try output_module_writer.print(
-                "    pub const {[msg]s} = @import(\"msg/{[msg]s}.zig\").{[msg]s};\n",
-                .{ .msg = msg_str[0 .. msg_str.len - 4] },
-            );
+                var data_entries = try loadMessage(allocator, &loaded_messages, path, package_name, &dependencies);
+                const zig_msg_str = try std.fmt.allocPrint(allocator, "{s}.zig", .{msg_str[0 .. msg_str.len - 4]});
 
-            var zig_file = try output_msg_dir.createFile(zig_msg_str, .{});
-            defer zig_file.close();
+                try output_module_writer.print(
+                    "    pub const {[msg]s} = @import(\"msg/{[msg]s}.zig\").{[msg]s};\n",
+                    .{ .msg = msg_str[0 .. msg_str.len - 4] },
+                );
 
-            var message_meta = MessageMetadata{
-                .struct_payload = try data_entries.payload(allocator),
-                .msg_type = data_entries.message_name,
-                .package_name = data_entries.package_name,
-                .init_body = "",
-                .deinit_body = "",
-                .additional_imports = try data_entries.additionalImports(allocator),
-            };
+                var zig_file = try output_msg_dir.createFile(zig_msg_str, .{});
+                defer zig_file.close();
 
-            if (data_entries.initRequired(&loaded_messages)) {
-                message_meta.init_body = try data_entries.initFunction(allocator, &loaded_messages);
+                var message_meta = MessageMetadata{
+                    .struct_payload = try data_entries.payload(allocator),
+                    .msg_type = data_entries.message_name,
+                    .package_name = data_entries.package_name,
+                    .init_body = "",
+                    .deinit_body = "",
+                    .additional_imports = try data_entries.additionalImports(allocator),
+                };
+
+                if (data_entries.initRequired(&loaded_messages)) {
+                    message_meta.init_body = try data_entries.initFunction(allocator, &loaded_messages);
+                }
+
+                if (data_entries.deinitRequired(&loaded_messages)) {
+                    message_meta.deinit_body = try data_entries.deinitFunction(allocator, &loaded_messages);
+                }
+
+                const zig_file_contents = try std.fmt.allocPrint(allocator, msg_file_format, .{
+                    .struct_payload = message_meta.struct_payload,
+                    .msg_type = message_meta.msg_type,
+                    .package_name = message_meta.package_name,
+                    .init_body = message_meta.init_body,
+                    .deinit_body = message_meta.deinit_body,
+                    .additional_imports = message_meta.additional_imports,
+                });
+
+                try zig_file.writeAll(zig_file_contents);
             }
-
-            if (data_entries.deinitRequired(&loaded_messages)) {
-                message_meta.deinit_body = try data_entries.deinitFunction(allocator, &loaded_messages);
-            }
-
-            const zig_file_contents = try std.fmt.allocPrint(allocator, file_format, .{
-                .struct_payload = message_meta.struct_payload,
-                .msg_type = message_meta.msg_type,
-                .package_name = message_meta.package_name,
-                .init_body = message_meta.init_body,
-                .deinit_body = message_meta.deinit_body,
-                .additional_imports = message_meta.additional_imports,
-            });
-
-            try zig_file.writeAll(zig_file_contents);
         }
-    }
+        try output_module_writer.writeAll("};\n");
+    } else |_| {} // TODO should still error on anything other than file not found?
 
-    try output_module_writer.writeAll("};\n");
+    const srv_path = try std.fmt.allocPrint(allocator, "{s}/srv", .{input_base});
+
+    // var msg_dir = try base_dir.openDir(msg_path, .{ .iterate = true });
+    if (base_dir.openDir(srv_path, .{ .iterate = true })) |srv_dir_in| {
+        var srv_dir = srv_dir_in; // TODO this is to remove the constness of the capture. seems odd that the captured value is forced const? even if caught by reference?
+        const output_srv_dir_path = try std.fmt.allocPrint(allocator, "{s}/srv", .{output_module_path});
+
+        std.debug.print("creating: {s}", .{output_srv_dir_path});
+        std.fs.makeDirAbsolute(output_srv_dir_path) catch |err| switch (err) {
+            error.PathAlreadyExists => {},
+            else => return err,
+        };
+        var output_srv_dir = try std.fs.openDirAbsolute(output_srv_dir_path, .{});
+        defer output_srv_dir.close();
+
+        try output_module.appendSlice("pub const srv = struct {\n");
+        var output_module_writer = output_module.writer();
+        defer srv_dir.close();
+        var srv_dir_it = srv_dir.iterate();
+        while (try srv_dir_it.next()) |srv_file| {
+            const srv_str = srv_file.name;
+            if (srv_str.len > 3 and std.mem.eql(u8, srv_str[srv_str.len - 3 .. srv_str.len], "srv")) {
+                const path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ srv_path, srv_file.name });
+
+                const data_entries = try loadService(allocator, &loaded_messages, path, package_name, &dependencies);
+
+                const zig_service_str = try std.fmt.allocPrint(allocator, "{s}.zig", .{srv_str[0 .. srv_str.len - 4]});
+                var service_file = try output_srv_dir.createFile(zig_service_str, .{});
+                defer service_file.close();
+
+                const service_file_contents = try std.fmt.allocPrint(allocator, service_struct_format, .{
+                    .srv_type = srv_str[0 .. srv_str.len - 4],
+                    .package_name = package_name,
+                });
+
+                try service_file.writeAll(service_file_contents);
+
+                const zig_request_str = try std.fmt.allocPrint(allocator, "{s}Request.zig", .{srv_str[0 .. srv_str.len - 4]});
+
+                // try output_module_writer.print(
+                //     "\n    pub const {[srv]s} = struct {{\n",
+                //     .{ .srv = srv_str[0 .. srv_str.len - 4] },
+                // );
+                // try output_module_writer.print(
+                //     "        extern fn rosidl_typesupport_c__get_service_type_support_handle__{[package_name]s}__srv__{[srv_type]s}() *const rosidl_runtime.RosidlServiceTypeSupport;\n",
+                //     .{
+                //         .package_name = data_entries.request.package_name,
+                //         .srv_type = srv_str[0 .. srv_str.len - 4],
+                //     },
+                // );
+                // try output_module_writer.print(
+                //     "        pub const Request = @import(\"srv/{[srv]s}Request.zig\").{[srv]s}Request;\n",
+                //     .{ .srv = srv_str[0 .. srv_str.len - 4] },
+                // );
+
+                var request_file = try output_srv_dir.createFile(zig_request_str, .{});
+                defer request_file.close();
+
+                const request_entries = data_entries.request;
+                var request_meta = MessageMetadata{
+                    .struct_payload = try request_entries.payload(allocator),
+                    .msg_type = request_entries.message_name,
+                    .package_name = request_entries.package_name,
+                    .init_body = "",
+                    .deinit_body = "",
+                    .additional_imports = try request_entries.additionalImports(allocator),
+                };
+
+                if (request_entries.initRequired(&loaded_messages)) {
+                    request_meta.init_body = try request_entries.initFunction(allocator, &loaded_messages);
+                }
+
+                if (request_entries.deinitRequired(&loaded_messages)) {
+                    request_meta.deinit_body = try request_entries.deinitFunction(allocator, &loaded_messages);
+                }
+
+                const request_file_contents = try std.fmt.allocPrint(allocator, request_file_format, .{
+                    .struct_payload = request_meta.struct_payload,
+                    .msg_type = request_meta.msg_type,
+                    .package_name = request_meta.package_name,
+                    .init_body = request_meta.init_body,
+                    .deinit_body = request_meta.deinit_body,
+                    .additional_imports = request_meta.additional_imports,
+                });
+
+                try request_file.writeAll(request_file_contents);
+
+                const zig_response_str = try std.fmt.allocPrint(allocator, "{s}Response.zig", .{srv_str[0 .. srv_str.len - 4]});
+                var response_file = try output_srv_dir.createFile(zig_response_str, .{});
+                defer response_file.close();
+
+                const response_entries = data_entries.response;
+                var response_meta = MessageMetadata{
+                    .struct_payload = try response_entries.payload(allocator),
+                    .msg_type = response_entries.message_name,
+                    .package_name = response_entries.package_name,
+                    .init_body = "",
+                    .deinit_body = "",
+                    .additional_imports = try response_entries.additionalImports(allocator),
+                };
+
+                if (response_entries.initRequired(&loaded_messages)) {
+                    response_meta.init_body = try response_entries.initFunction(allocator, &loaded_messages);
+                }
+
+                if (response_entries.deinitRequired(&loaded_messages)) {
+                    response_meta.deinit_body = try response_entries.deinitFunction(allocator, &loaded_messages);
+                }
+
+                const response_file_contents = try std.fmt.allocPrint(allocator, response_file_format, .{
+                    .struct_payload = response_meta.struct_payload,
+                    .msg_type = response_meta.msg_type,
+                    .package_name = response_meta.package_name,
+                    .init_body = response_meta.init_body,
+                    .deinit_body = response_meta.deinit_body,
+                    .additional_imports = response_meta.additional_imports,
+                });
+
+                try response_file.writeAll(response_file_contents);
+
+                try output_module_writer.print(
+                    "    pub const {[srv]s} = @import(\"srv/{[srv]s}.zig\");\n",
+                    .{ .srv = srv_str[0 .. srv_str.len - 4] },
+                );
+            }
+        }
+        try output_module_writer.writeAll("};\n");
+    } else |_| {
+        std.debug.print("error opening: {s}", .{srv_path});
+    } // TODO should still error on anything other than file not found?
 
     var output_file = try std.fs.createFileAbsolute(output_module_file, .{});
     defer output_file.close();

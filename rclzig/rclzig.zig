@@ -1,6 +1,7 @@
 const std = @import("std");
 
-const rcl = @import("rcl.zig").rcl;
+// This is pub mainly for tests, please use sparingly. Favor rclzig interfaces instead
+pub const rcl = @import("rcl.zig").rcl;
 
 pub const allocator = @import("allocator.zig");
 pub const RclAllocator = @import("allocator.zig").RclAllocator;
@@ -12,6 +13,9 @@ pub const subscription = @import("subscription.zig");
 pub const publisher = @import("publisher.zig");
 pub const rosidl_runtime = @import("rosidl_runtime.zig");
 pub const rmw = @import("rmw.zig");
+
+pub const service = @import("service.zig");
+pub const client = @import("client.zig");
 
 // Sequence
 pub const Sequence = @import("sequence.zig").Sequence;
@@ -67,11 +71,10 @@ pub fn init(allocator_: RclAllocator) !Context {
 }
 
 pub fn shutdown(context: *Context) void {
-    // Should be safe to ignore return
-    // https://github.com/ros2/rcl/blob/rolling/rcl/include/rcl/context.h#L185
-    _ = rcl.rcl_context_fini(context);
-
     // Should be safe to ingore return
     // https://github.com/ros2/rcl/blob/rolling/rcl/include/rcl/init.h#L107
     _ = rcl.rcl_shutdown(context);
+    // Should be safe to ignore return
+    // https://github.com/ros2/rcl/blob/rolling/rcl/include/rcl/context.h#L185
+    _ = rcl.rcl_context_fini(context);
 }

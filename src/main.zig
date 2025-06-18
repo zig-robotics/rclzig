@@ -193,6 +193,15 @@ const TestNodeSequences = struct {
     }
 };
 
+pub fn serviceCallback(
+    req: *const rcl_interfaces.srv.GetParameters.Request,
+    resp: *rcl_interfaces.srv.GetParameters.Response,
+) void {
+    _ = req;
+    _ = resp;
+    std.log.info("in service callback");
+}
+
 pub fn main() !u8 {
     var gpa = std.heap.GeneralPurposeAllocator(.{ .enable_memory_limit = true }){};
     defer {
@@ -206,8 +215,6 @@ pub fn main() !u8 {
     const allocator = gpa.allocator();
     // var allocator = std.heap.c_allocator;
     const rcl_allocator = rclzig.allocator.getDefaultRclAllocator();
-    const paramter_msg = try rcl_interfaces.msg.Parameter.init(rcl_allocator);
-    _ = paramter_msg;
 
     // var allocator = std.heap.c_allocator; // The subscriber middleware seems to be calling free internally.
     // This means that when sequences are used, we're forced to use the c allocator
